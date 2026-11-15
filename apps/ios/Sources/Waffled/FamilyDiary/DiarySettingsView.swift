@@ -60,27 +60,42 @@ struct DiaryMemberEditor: View {
     @Environment(\.dismiss) private var dismiss
     @State var member: DiaryMember
     @State private var confirmDelete = false
+    @State private var hasBirthday = false
+    @State private var birthday = Date()
+    @State private var school = ""
     private var existing: Bool { store.members.contains { $0.id == member.id } }
-
     var body: some View {
         NavigationStack {
             Form {
-                TextField("Имя", text: $member.name)
-                Toggle("Ребёнок", isOn: $member.isChild)
-                if existing { Button("Удалить профиль", role: .destructive) { confirmDelete = true } }
+                Section {
+                    HStack { Spacer(); Text(member.emoji).font(.system(size: 56)).padding(18).background(Paper.gold.opacity(0.1), in: Circle()); Spacer() }
+                    TextField(member.isChild ? "Имя ребёнка" : "Имя", text: $member.name).accessibilityIdentifier("member.name")
+                    Toggle("Ребёнок", isOn: $member.isChild)
+                    if member.isChild {
+                        Toggle("Указать дату рождения", isOn: $hasBirthday)
+                        if hasBirthday { DatePicker("Дата рождения", selection: $birthday, in: ...Date(), displayedComponents: .date) }
+                        TextField("Класс · если ребёнок учится", text: $school)
+                    }
+                }.listRowBackground(Paper.page.opacity(0.9))
+                if existing { Section { Button("Удалить профиль", role: .destructive) { confirmDelete = true } }.listRowBackground(Paper.page) }
             }
-            .navigationTitle(existing ? "Профиль" : "Новый профиль")
+            .scrollContentBackground(.hidden).background(PaperBackground())
+            .navigationTitle(existing ? "Профиль" : member.isChild ? "Новый ребёнок" : "Новый профиль")
             .navigationBarTitleDisplayMode(.inline)
+            .toolbarBackground(Paper.page, for: .navigationBar).toolbarBackground(.visible, for: .navigationBar)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Отмена") { dismiss() } }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Сохранить") { if store.saveMember(member) { dismiss() } }
-                        .disabled(member.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    Button("Сохранить") {
+                        if member.isChild { member.birthday = hasBirthday ? birthday : nil; member.schoolClass = school.trimmingCharacters(in: .whitespacesAndNewlines) }
+                        if store.saveMember(member) { dismiss() }
+                    }.disabled(member.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 }
             }
             .confirmationDialog("Удалить профиль? Записи сохранятся без привязки к нему.", isPresented: $confirmDelete, titleVisibility: .visible) {
                 Button("Удалить", role: .destructive) { if store.deleteMember(member.id) { dismiss() } }
             }
-        }
+            .onAppear { birthday = member.birthday ?? Date(); hasBirthday = member.birthday != nil; school = member.schoolClass ?? "" }
+        }.tint(Paper.sage).environment(\.locale, Locale(identifier: "ru_RU"))
     }
 }

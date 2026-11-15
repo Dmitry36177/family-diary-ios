@@ -60,12 +60,29 @@ struct DiaryEntry: Identifiable, Codable, Equatable, Sendable {
     var quantity = ""
     var category = "Продукты"
     var completed = false
+    var weekdays: [Int]?
+    var completedDates: [String]?
 
     static let shoppingCategories = ["Продукты", "Детям", "Бытовая химия", "Для дома"]
     static let reminderOptions = [0, 15, 60, 1440]
 
     func nextOccurrence(onOrAfter threshold: Date, tz: TimeZone) -> Date? {
         guard let dueAt else { return nil }
+        if repeatRule == .weekly, let weekdays, !weekdays.isEmpty {
+            var calendar = Calendar(identifier: .gregorian)
+            calendar.timeZone = tz
+            let first = max(threshold, dueAt)
+            let time = calendar.dateComponents([.hour, .minute, .second], from: dueAt)
+            for offset in 0...7 {
+                guard let day = calendar.date(byAdding: .day, value: offset, to: calendar.startOfDay(for: first)),
+                      weekdays.contains(calendar.component(.weekday, from: day)),
+                      let candidate = calendar.date(bySettingHour: time.hour ?? 0, minute: time.minute ?? 0,
+                                                    second: time.second ?? 0, of: day),
+                      candidate >= first else { continue }
+                return candidate
+            }
+            return nil
+        }
         if dueAt >= threshold { return dueAt }
         guard repeatRule != .never else { return nil }
         var calendar = Calendar(identifier: .gregorian)
@@ -84,8 +101,32 @@ struct DiaryEntry: Identifiable, Codable, Equatable, Sendable {
     func nextReminder(after now: Date, tz: TimeZone) -> Date? {
         guard !completed, let reminderMinutes else { return nil }
         let lead = TimeInterval(reminderMinutes * 60)
-        guard let next = nextOccurrence(onOrAfter: now.addingTimeInterval(lead + 1), tz: tz) else { return nil }
-        return next.addingTimeInterval(-lead)
+        var threshold = now.addingTimeInterval(lead + 1)
+        for _ in 0...(completedDates?.count ?? 0) {
+            guard let next = nextOccurrence(onOrAfter: threshold, tz: tz) else { return nil }
+            if !isCompleted(on: next, tz: tz) { return next.addingTimeInterval(-lead) }
+            threshold = next.addingTimeInterval(1)
+        }
+        return nil
+    }
+
+    private func completionKey(_ day: Date, tz: TimeZone) -> String {
+        var calendar = Calendar(identifier: .gregorian); calendar.timeZone = tz
+        let c = calendar.dateComponents([.year, .month, .day], from: day)
+        return String(format: "%04d-%02d-%02d", c.year ?? 0, c.month ?? 0, c.day ?? 0)
+    }
+
+    func isCompleted(on day: Date, tz: TimeZone) -> Bool {
+        completed || (repeatRule != .never && (completedDates ?? []).contains(completionKey(day, tz: tz)))
+    }
+
+    mutating func toggleCompletion(on day: Date, tz: TimeZone) {
+        guard repeatRule != .never else { completed.toggle(); return }
+        if completed { completed = false; return }
+        let key = completionKey(day, tz: tz)
+        var dates = completedDates ?? []
+        if dates.contains(key) { dates.removeAll { $0 == key } } else { dates.append(key) }
+        completedDates = dates
     }
 
     func occurs(on day: Date, tz: TimeZone) -> Bool {
